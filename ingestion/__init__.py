@@ -1,0 +1,1 @@
+"""CineScope data ingestion package."""

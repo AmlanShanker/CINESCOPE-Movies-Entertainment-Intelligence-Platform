@@ -1,0 +1,1 @@
+"""CineScope database package."""
