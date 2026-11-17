@@ -60,6 +60,8 @@ if not selected_id:
 
 # Source/API configuration is kept out of the viewer-facing layout.
 
+source_movies, source_memberships, report = load_all_datasets()
+
 if not report["loaded"]:
     st.warning("No valid source CSVs found. Add the three files to data/raw/ to begin.")
     for item in DATASETS:
