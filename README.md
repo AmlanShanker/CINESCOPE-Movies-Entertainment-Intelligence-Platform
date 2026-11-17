@@ -39,6 +39,20 @@ streamlit run app.py
 
 On startup, CineScope validates the source CSV files, synchronizes the SQLite database, and then reads the dashboard data from SQLite. The refresh is repeatable and preserves a movie's separate rank in each source list.
 
+## TMDB poster and metadata enrichment
+
+CineScope can enrich its catalogue using the TMDB API. Add your TMDB API Read Access Token to a local Streamlit secrets file:
+
+```toml
+TMDB_READ_ACCESS_TOKEN = "your-read-access-token"
+```
+
+Create the file at `.streamlit/secrets.toml` in the project root. This path is ignored by Git. Never commit the token, paste it into source code, or share it in screenshots. The Read Access Token is used as a Bearer token; the v3 API key is not required by this integration.
+
+The app only calls TMDB when the user clicks **Enrich next 40 movies with TMDB**. It saves successful, ambiguous and unmatched lookup outcomes in SQLite so completed lookups are not repeated on every app run. Repeated batches can be run until the catalogue has been checked. Matching is deliberately conservative: a normalized exact title match is required; ambiguous titles are left unmatched rather than guessed. The current Letterboxd CSVs do not include release years, so some same-title remakes may need manual review.
+
+Poster image URLs are built from TMDB's poster paths at display time. TMDB metadata and ratings are distinct from Letterboxd list ranks. Review TMDB's attribution and usage requirements before public deployment.
+
 ## Planned modules
 
 1. Executive Overview
