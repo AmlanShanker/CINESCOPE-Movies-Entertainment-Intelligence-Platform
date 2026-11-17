@@ -215,7 +215,7 @@ if selected_id:
 search = st.text_input("Search movie titles", key="catalogue_search")
 year_values = (
     poster_catalogue["release_date"].fillna("").astype(str).str[:4]
-    .where(catalogue["release_date"].notna(), "")
+    .where(poster_catalogue["release_date"].notna(), "")
 )
 available_years = sorted(
     {value for value in year_values if value.isdigit()}, reverse=True
@@ -244,7 +244,7 @@ else:
     poster_cols = st.columns(5)
     for idx, (_, movie) in enumerate(visible.iterrows()):
         with poster_cols[idx % 5]:
-            image_url = poster_url(movie["poster_path"]) or poster_placeholder(movie["title"])
+            image_url = poster_url(movie["poster_path"])
             movie_id = int(movie["movie_id"])
             title_text = html.escape(str(movie["title"]))
             st.markdown(
