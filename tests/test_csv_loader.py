@@ -1,4 +1,5 @@
 import pandas as pd
+
 from ingestion.csv_loader import load_dataset
 
 
@@ -22,3 +23,16 @@ def test_loader_reports_missing_columns(tmp_path):
     assert movies.empty and members.empty
     assert report["rejected_rows"] == 1
     assert "Missing required columns" in report["errors"][0]
+
+
+def test_loader_reads_utf8_bom_header(tmp_path):
+    path = tmp_path / "bom.csv"
+    path.write_text(
+        "\ufeffRank,Title,LetterboxdURI\n"
+        "1,Film A,https://letterboxd.com/film/film-a/\n",
+        encoding="utf-8",
+    )
+    movies, members, report = load_dataset(path, "BOM")
+    assert list(movies["title"]) == ["Film A"]
+    assert len(members) == 1
+    assert report["valid_rows"] == 1
