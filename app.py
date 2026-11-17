@@ -1,3 +1,5 @@
+import base64
+import html
 import json
 import os
 
@@ -90,76 +92,194 @@ tmdb_token = (
 st.divider()
 st.header("🎞️ Movie catalogue")
 
-# Automatically enrich a small batch once per Streamlit session. Results are
-# persisted in SQLite, so completed lookups are not repeated on later runs.
-if tmdb_token and not st.session_state.get("tmdb_auto_enrichment_started", False):
-    st.session_state["tmdb_auto_enrichment_started"] = True
-    pending = get_pending_tmdb_movies(limit=40)
-    if not pending.empty:
-        client = TMDBClient(tmdb_token)
-        progress = st.progress(0, text="Automatically loading movie posters…")
-        completed = 0
-        for _, row in pending.iterrows():
-            try:
-                metadata = client.enrich_title(row["title"])
-                save_tmdb_metadata(row["movie_id"], metadata)
-                completed += 1
-                progress.progress(
-                    completed / len(pending),
-                    text=f"Loading movie artwork ({completed}/{len(pending)})…",
-                )
-            except Exception:
-                # Keep the dashboard usable if TMDB is temporarily unavailable.
-                # Unprocessed movies remain pending and can be retried next session.
-                break
-        progress.empty()
+# Process every unchecked source record automatically. Each title uses one
+# TMDB search request; successful, ambiguous and unmatched results are cached.
+pending = get_pending_tmdb_movies(limit=max(len(movies), 1))
+if tmdb_token and not pending.empty:
+    client = TMDBClient(tmdb_token)
+    progress = st.progress(0, text=f"Checking all {len(pending)} remaining movie records…")
+    completed = 0
+    failed_title = None
+    for _, row in pending.iterrows():
+        try:
+            metadata = client.enrich_title(row["title"])
+            save_tmdb_metadata(row["movie_id"], metadata)
+            completed += 1
+            progress.progress(
+                completed / len(pending),
+                text=f"TMDB catalogue enrichment: {completed} of {len(pending)} records checked",
+            )
+        except Exception as exc:
+            failed_title = row["title"]
+            st.warning(
+                f"TMDB temporarily stopped while checking '{failed_title}'. "
+                "The remaining records are still pending and will be retried automatically "
+                "when the app is run again."
+            )
+            break
+    progress.empty()
+    if failed_title is None and completed:
+        st.success(f"Finished checking {completed} movie record(s).")
 
 catalogue = get_movie_catalogue()
 matched_count = int(catalogue["tmdb_id"].notna().sum())
 checked_count = int(catalogue["match_status"].notna().sum())
-pending_count = len(movies) - checked_count
-col1, col2, col3 = st.columns(3)
-col1.metric("TMDB matched", matched_count)
-col2.metric("Not yet checked", pending_count)
-col3.metric("Movies without a poster", int(catalogue["poster_path"].isna().sum()))
+pending_count = max(0, len(catalogue) - checked_count)
+poster_count = int(catalogue["poster_path"].notna().sum())
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Total movies", len(catalogue))
+col2.metric("TMDB matches", matched_count)
+col3.metric("Official posters", poster_count)
+col4.metric("Lookups remaining", pending_count)
+
+# A title card remains visible even if TMDB has no official poster for it.
+def poster_placeholder(title):
+    safe_title = html.escape(str(title))
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="500" height="750" viewBox="0 0 500 750">'
+        '<rect width="500" height="750" fill="#202633"/>'
+        '<path d="M0 520 L500 330 L500 750 L0 750Z" fill="#303b4d"/>'
+        '<text x="250" y="300" fill="#ffffff" font-size="34" text-anchor="middle">CINESCOPE</text>'
+        f'<foreignObject x="35" y="390" width="430" height="220"><div xmlns="http://www.w3.org/1999/xhtml" '
+        'style="color:white;font: bold 25px sans-serif;text-align:center;overflow-wrap:anywhere;">'
+        f'{safe_title}</div></foreignObject>'
+        '<text x="250" y="690" fill="#c5ccd8" font-size="18" text-anchor="middle">Artwork unavailable</text>'
+        '</svg>'
+    )
+    return "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
+
+
+# A query-string route gives each poster a shareable, dedicated detail view.
+selected_id = st.query_params.get("movie_id")
+if selected_id:
+    try:
+        selected_id = int(selected_id)
+        selected_rows = catalogue[catalogue["movie_id"] == selected_id]
+    except (TypeError, ValueError):
+        selected_rows = catalogue.iloc[0:0]
+
+    if selected_rows.empty:
+        st.error("That movie could not be found in the current catalogue.")
+    else:
+        movie = selected_rows.iloc[0]
+        st.subheader(str(movie["title"]))
+        if st.button("← Back to movie catalogue"):
+            st.query_params.clear()
+            st.rerun()
+
+        # Fetch full TMDB detail fields only when a movie's detail page is opened.
+        if tmdb_token and pd.notna(movie["tmdb_id"]) and (
+            pd.isna(movie["runtime"]) or not movie["genres_json"] or movie["genres_json"] == "[]"
+        ):
+            try:
+                details = TMDBClient(tmdb_token).movie_details(int(movie["tmdb_id"]))
+                save_tmdb_metadata(int(movie["movie_id"]), {
+                    "tmdb_id": details.get("id"),
+                    "poster_path": details.get("poster_path"),
+                    "backdrop_path": details.get("backdrop_path"),
+                    "overview": details.get("overview"),
+                    "release_date": details.get("release_date"),
+                    "original_language": details.get("original_language"),
+                    "vote_average": details.get("vote_average"),
+                    "vote_count": details.get("vote_count"),
+                    "runtime": details.get("runtime"),
+                    "genres": [g.get("name") for g in details.get("genres", [])],
+                    "match_status": "matched",
+                })
+                catalogue = get_movie_catalogue()
+                movie = catalogue[catalogue["movie_id"] == selected_id].iloc[0]
+            except Exception:
+                st.info("Additional TMDB details are temporarily unavailable; showing the cached information.")
+
+        detail_left, detail_right = st.columns([1, 2])
+        with detail_left:
+            image_url = poster_url(movie["poster_path"]) or poster_placeholder(movie["title"])
+            st.image(image_url, use_container_width=True)
+        with detail_right:
+            release_date = movie["release_date"] if pd.notna(movie["release_date"]) else "Not available"
+            year = str(release_date)[:4] if release_date != "Not available" else "Unknown"
+            st.markdown(f"**Release year:** {year}")
+            st.markdown(f"**Release date:** {release_date}")
+            st.markdown(f"**Runtime:** {int(movie['runtime'])} minutes" if pd.notna(movie["runtime"]) else "**Runtime:** Not available")
+            st.markdown(f"**Original language:** {movie['original_language'] or 'Not available'}")
+            if pd.notna(movie["vote_average"]):
+                st.markdown(f"**TMDB rating:** {float(movie['vote_average']):.1f}/10 ({int(movie['vote_count'] or 0):,} votes)")
+            genres = json.loads(movie["genres_json"] or "[]")
+            st.markdown("**Genres:** " + (", ".join(genres) if genres else "Not available"))
+            st.markdown("**Overview**")
+            st.write(movie["overview"] or "No synopsis is available from TMDB.")
+            st.markdown(f"[Open Letterboxd page]({movie['letterboxd_uri']})")
+            if pd.notna(movie["tmdb_id"]):
+                st.markdown(f"[Open TMDB page](https://www.themoviedb.org/movie/{int(movie['tmdb_id'])})")
+
+        source_rows = memberships[memberships["letterboxd_uri"] == movie["letterboxd_uri"]]
+        st.markdown("**Curated list appearances**")
+        if source_rows.empty:
+            st.caption("No source-list membership found.")
+        else:
+            st.dataframe(
+                source_rows[["list_name", "rank"]].rename(
+                    columns={"list_name": "List", "rank": "List rank"}
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+    st.stop()
 
 search = st.text_input("Search movie titles", key="catalogue_search")
-matched = catalogue[catalogue["tmdb_id"].notna()].copy()
-if search.strip():
-    matched = matched[matched["title"].str.contains(search.strip(), case=False, na=False)]
+year_values = (
+    catalogue["release_date"].fillna("").astype(str).str[:4]
+    .where(catalogue["release_date"].notna(), "")
+)
+available_years = sorted(
+    {value for value in year_values if value.isdigit()}, reverse=True
+)
+year_options = ["All years"] + available_years + ["Unknown year"]
+selected_year = st.selectbox("Filter by release year", year_options)
 
-st.caption(f"{len(matched)} TMDB-matched movies")
-if matched.empty:
-    st.info("Movie artwork will appear here as the catalogue is automatically enriched.")
+filtered = catalogue.copy()
+if search.strip():
+    filtered = filtered[filtered["title"].str.contains(search.strip(), case=False, na=False)]
+if selected_year == "Unknown year":
+    filtered = filtered[year_values.loc[filtered.index] == ""]
+elif selected_year != "All years":
+    filtered = filtered[year_values.loc[filtered.index] == selected_year]
+
+st.caption(f"Showing {len(filtered)} of {len(catalogue)} movie records. Select any poster to open its detail page.")
+if filtered.empty:
+    st.info("No movies match the selected search and year.")
 else:
     page_size = 40
-    page_count = max(1, (len(matched) + page_size - 1) // page_size)
+    page_count = max(1, (len(filtered) + page_size - 1) // page_size)
     page = st.selectbox(
         "Poster page",
         options=list(range(1, page_count + 1)),
         format_func=lambda value: f"Page {value} of {page_count}",
     )
-    visible = matched.iloc[(page - 1) * page_size : page * page_size]
+    visible = filtered.iloc[(page - 1) * page_size : page * page_size]
     poster_cols = st.columns(5)
     for idx, (_, movie) in enumerate(visible.iterrows()):
         with poster_cols[idx % 5]:
-            image_url = poster_url(movie["poster_path"])
-            if image_url:
-                st.image(image_url, use_container_width=True)
-            else:
-                st.markdown("🎬")
+            image_url = poster_url(movie["poster_path"]) or poster_placeholder(movie["title"])
+            movie_id = int(movie["movie_id"])
+            title_text = html.escape(str(movie["title"]))
+            st.markdown(
+                f'<a href="?movie_id={movie_id}" title="View {title_text}">'
+                f'<img src="{image_url}" alt="{title_text}" '
+                'style="width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:8px;cursor:pointer;" />'
+                '</a>',
+                unsafe_allow_html=True,
+            )
             st.markdown(f"**{movie['title']}**")
             release_year = str(movie["release_date"] or "")[:4]
-            if release_year:
+            if release_year and release_year != "nan":
                 st.caption(release_year)
+            elif pd.isna(movie["tmdb_id"]):
+                st.caption("TMDB match unavailable")
+            elif pd.isna(movie["poster_path"]):
+                st.caption("Official poster unavailable")
             if pd.notna(movie["vote_average"]):
-                st.caption(f"TMDB ★ {movie['vote_average']:.1f} · {int(movie['vote_count'] or 0)} votes")
-            with st.expander("Details"):
-                st.write(movie["overview"] or "No overview available.")
-                genres = json.loads(movie["genres_json"] or "[]")
-                if genres:
-                    st.caption("Genres: " + ", ".join(genres))
-                st.caption(f"TMDB ID: {int(movie['tmdb_id'])}")
+                st.caption(f"TMDB ★ {float(movie['vote_average']):.1f} · {int(movie['vote_count'] or 0):,} votes")
 
 with st.expander("Show all movie records and TMDB match status"):
     display = catalogue[["title", "release_date", "vote_average", "match_status"]].copy()
