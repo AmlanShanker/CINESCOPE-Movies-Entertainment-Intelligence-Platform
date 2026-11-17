@@ -1,4 +1,3 @@
-import base64
 import html
 import json
 import os
@@ -125,36 +124,23 @@ catalogue = get_movie_catalogue()
 matched_count = int(catalogue["tmdb_id"].notna().sum())
 checked_count = int(catalogue["match_status"].notna().sum())
 pending_count = max(0, len(catalogue) - checked_count)
-poster_count = int(catalogue["poster_path"].notna().sum())
+has_poster = catalogue["poster_path"].fillna("").astype(str).str.strip().ne("")
+poster_catalogue = catalogue.loc[has_poster].copy()
+poster_count = len(poster_catalogue)
+hidden_count = len(catalogue) - poster_count
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Total movies", len(catalogue))
-col2.metric("TMDB matches", matched_count)
-col3.metric("Official posters", poster_count)
+col1.metric("Source movies", len(catalogue))
+col2.metric("Movies with posters", poster_count)
+col3.metric("Hidden (no poster)", hidden_count)
 col4.metric("Lookups remaining", pending_count)
-
-# A title card remains visible even if TMDB has no official poster for it.
-def poster_placeholder(title):
-    safe_title = html.escape(str(title))
-    svg = (
-        '<svg xmlns="http://www.w3.org/2000/svg" width="500" height="750" viewBox="0 0 500 750">'
-        '<rect width="500" height="750" fill="#202633"/>'
-        '<path d="M0 520 L500 330 L500 750 L0 750Z" fill="#303b4d"/>'
-        '<text x="250" y="300" fill="#ffffff" font-size="34" text-anchor="middle">CINESCOPE</text>'
-        f'<foreignObject x="35" y="390" width="430" height="220"><div xmlns="http://www.w3.org/1999/xhtml" '
-        'style="color:white;font: bold 25px sans-serif;text-align:center;overflow-wrap:anywhere;">'
-        f'{safe_title}</div></foreignObject>'
-        '<text x="250" y="690" fill="#c5ccd8" font-size="18" text-anchor="middle">Artwork unavailable</text>'
-        '</svg>'
-    )
-    return "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
-
+st.caption("Only movies with an official TMDB poster are shown. Movies without poster artwork remain stored in SQLite and the original CSV files.")
 
 # A query-string route gives each poster a shareable, dedicated detail view.
 selected_id = st.query_params.get("movie_id")
 if selected_id:
     try:
         selected_id = int(selected_id)
-        selected_rows = catalogue[catalogue["movie_id"] == selected_id]
+        selected_rows = poster_catalogue[poster_catalogue["movie_id"] == selected_id]
     except (TypeError, ValueError):
         selected_rows = catalogue.iloc[0:0]
 
@@ -193,7 +179,7 @@ if selected_id:
 
         detail_left, detail_right = st.columns([1, 2])
         with detail_left:
-            image_url = poster_url(movie["poster_path"]) or poster_placeholder(movie["title"])
+            image_url = poster_url(movie["poster_path"])
             st.image(image_url, use_container_width=True)
         with detail_right:
             release_date = movie["release_date"] if pd.notna(movie["release_date"]) else "Not available"
@@ -228,8 +214,8 @@ if selected_id:
 
 search = st.text_input("Search movie titles", key="catalogue_search")
 year_values = (
-    catalogue["release_date"].fillna("").astype(str).str[:4]
-    .where(catalogue["release_date"].notna(), "")
+    poster_catalogue["release_date"].fillna("").astype(str).str[:4]
+    .where(poster_catalogue["release_date"].notna(), "")
 )
 available_years = sorted(
     {value for value in year_values if value.isdigit()}, reverse=True
@@ -237,7 +223,7 @@ available_years = sorted(
 year_options = ["All years"] + available_years + ["Unknown year"]
 selected_year = st.selectbox("Filter by release year", year_options)
 
-filtered = catalogue.copy()
+filtered = poster_catalogue.copy()
 if search.strip():
     filtered = filtered[filtered["title"].str.contains(search.strip(), case=False, na=False)]
 if selected_year == "Unknown year":
@@ -245,26 +231,24 @@ if selected_year == "Unknown year":
 elif selected_year != "All years":
     filtered = filtered[year_values.loc[filtered.index] == selected_year]
 
-st.caption(f"Showing {len(filtered)} of {len(catalogue)} movie records. Select any poster to open its detail page.")
+st.caption(f"Showing {len(filtered)} of {len(poster_catalogue)} movies with official posters. Select a poster to view its details.")
 if filtered.empty:
     st.info("No movies match the selected search and year.")
 else:
     page_size = 40
     page_count = max(1, (len(filtered) + page_size - 1) // page_size)
-    page = st.selectbox(
-        "Poster page",
-        options=list(range(1, page_count + 1)),
-        format_func=lambda value: f"Page {value} of {page_count}",
-    )
+    current_page = int(st.session_state.get("poster_page", 1))
+    st.session_state["poster_page"] = min(max(current_page, 1), page_count)
+    page = st.session_state["poster_page"]
     visible = filtered.iloc[(page - 1) * page_size : page * page_size]
     poster_cols = st.columns(5)
     for idx, (_, movie) in enumerate(visible.iterrows()):
         with poster_cols[idx % 5]:
-            image_url = poster_url(movie["poster_path"]) or poster_placeholder(movie["title"])
+            image_url = poster_url(movie["poster_path"])
             movie_id = int(movie["movie_id"])
             title_text = html.escape(str(movie["title"]))
             st.markdown(
-                f'<a href="?movie_id={movie_id}" title="View {title_text}">'
+                f'<a href="?movie_id={movie_id}" target="_self" title="View {title_text}">'
                 f'<img src="{image_url}" alt="{title_text}" '
                 'style="width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:8px;cursor:pointer;" />'
                 '</a>',
@@ -274,17 +258,16 @@ else:
             release_year = str(movie["release_date"] or "")[:4]
             if release_year and release_year != "nan":
                 st.caption(release_year)
-            elif pd.isna(movie["tmdb_id"]):
-                st.caption("TMDB match unavailable")
-            elif pd.isna(movie["poster_path"]):
-                st.caption("Official poster unavailable")
             if pd.notna(movie["vote_average"]):
                 st.caption(f"TMDB ★ {float(movie['vote_average']):.1f} · {int(movie['vote_count'] or 0):,} votes")
 
-with st.expander("Show all movie records and TMDB match status"):
-    display = catalogue[["title", "release_date", "vote_average", "match_status"]].copy()
-    display.columns = ["Title", "Release date", "TMDB rating", "Match status"]
-    st.dataframe(display, use_container_width=True, hide_index=True)
+    st.divider()
+    st.selectbox(
+        "Poster page",
+        options=list(range(1, page_count + 1)),
+        format_func=lambda value: f"Page {value} of {page_count}",
+        key="poster_page",
+    )
 
 st.info(
     "List rank is not a movie rating. TMDB ratings are separate from Letterboxd list ranks. "
