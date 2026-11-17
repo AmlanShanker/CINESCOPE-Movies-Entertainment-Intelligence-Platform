@@ -89,58 +89,59 @@ tmdb_token = (
 
 st.divider()
 st.header("🎞️ Movie catalogue")
-catalogue = get_movie_catalogue()
-matched_count = int(catalogue["tmdb_id"].notna().sum())
-pending = get_pending_tmdb_movies(limit=40)
-col1, col2, col3 = st.columns(3)
-col1.metric("TMDB matched", matched_count)
-col2.metric("Not yet checked", len(movies) - int(catalogue["match_status"].notna().sum()))
-col3.metric("Movies without a poster", int(catalogue["poster_path"].isna().sum()))
 
-with st.expander("Connect or update TMDB credentials"):
-    st.markdown(
-        "Create a file named .streamlit/secrets.toml in your project folder and add "
-        "the following line. Do not commit or share this file:"
-    )
-    st.code('TMDB_READ_ACCESS_TOKEN = "paste-your-read-access-token-here"', language="toml")
-    st.caption("The API Read Access Token is used as a Bearer token. Your v3 API key is not required for this integration.")
-
-if not tmdb_token:
-    st.info("Add your TMDB Read Access Token in Streamlit secrets to enable poster and metadata enrichment.")
-else:
-    st.caption("TMDB is queried only when you request a batch. Existing matches are reused from SQLite.")
-    if st.button("Enrich next 40 movies with TMDB", type="primary", disabled=pending.empty):
+# Automatically enrich a small batch once per Streamlit session. Results are
+# persisted in SQLite, so completed lookups are not repeated on later runs.
+if tmdb_token and not st.session_state.get("tmdb_auto_enrichment_started", False):
+    st.session_state["tmdb_auto_enrichment_started"] = True
+    pending = get_pending_tmdb_movies(limit=40)
+    if not pending.empty:
         client = TMDBClient(tmdb_token)
-        progress = st.progress(0, text="Starting TMDB enrichment…")
+        progress = st.progress(0, text="Automatically loading movie posters…")
         completed = 0
-        failures = 0
         for _, row in pending.iterrows():
             try:
                 metadata = client.enrich_title(row["title"])
                 save_tmdb_metadata(row["movie_id"], metadata)
                 completed += 1
-            except Exception as exc:
-                failures += 1
-                st.error(f"TMDB request stopped at '{row['title']}': {exc}")
+                progress.progress(
+                    completed / len(pending),
+                    text=f"Loading movie artwork ({completed}/{len(pending)})…",
+                )
+            except Exception:
+                # Keep the dashboard usable if TMDB is temporarily unavailable.
+                # Unprocessed movies remain pending and can be retried next session.
                 break
-            progress.progress(completed / len(pending), text=f"Checked {completed} of {len(pending)} movies…")
-        st.success(f"Saved {completed} TMDB lookup result(s).")
-        if failures:
-            st.warning("The batch stopped after an API/network error. Check your credentials or connection, then retry.")
-        st.rerun()
+        progress.empty()
 
 catalogue = get_movie_catalogue()
+matched_count = int(catalogue["tmdb_id"].notna().sum())
+checked_count = int(catalogue["match_status"].notna().sum())
+pending_count = len(movies) - checked_count
+col1, col2, col3 = st.columns(3)
+col1.metric("TMDB matched", matched_count)
+col2.metric("Not yet checked", pending_count)
+col3.metric("Movies without a poster", int(catalogue["poster_path"].isna().sum()))
+
 search = st.text_input("Search movie titles", key="catalogue_search")
 matched = catalogue[catalogue["tmdb_id"].notna()].copy()
 if search.strip():
     matched = matched[matched["title"].str.contains(search.strip(), case=False, na=False)]
-st.caption(f"{len(matched)} TMDB-matched movies shown")
 
+st.caption(f"{len(matched)} TMDB-matched movies")
 if matched.empty:
-    st.info("No matched movies to display yet. Add your token and run the first enrichment batch.")
+    st.info("Movie artwork will appear here as the catalogue is automatically enriched.")
 else:
+    page_size = 40
+    page_count = max(1, (len(matched) + page_size - 1) // page_size)
+    page = st.selectbox(
+        "Poster page",
+        options=list(range(1, page_count + 1)),
+        format_func=lambda value: f"Page {value} of {page_count}",
+    )
+    visible = matched.iloc[(page - 1) * page_size : page * page_size]
     poster_cols = st.columns(5)
-    for idx, (_, movie) in enumerate(matched.head(40).iterrows()):
+    for idx, (_, movie) in enumerate(visible.iterrows()):
         with poster_cols[idx % 5]:
             image_url = poster_url(movie["poster_path"])
             if image_url:
