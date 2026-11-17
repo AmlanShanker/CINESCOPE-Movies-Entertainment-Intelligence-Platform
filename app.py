@@ -21,7 +21,7 @@ st.markdown("""
 .stApp{background:radial-gradient(ellipse at 12% 0%,rgba(111,35,70,.22),transparent 38%),radial-gradient(ellipse at 90% 8%,rgba(42,69,112,.20),transparent 34%),linear-gradient(160deg,#090b12,#10131d 48%,#090b12);color:#f4f4f7;font-family:'DM Sans',sans-serif}
 h1,h2,h3{font-family:'Outfit',sans-serif!important;letter-spacing:-.035em}
 [data-testid="stHeader"]{background:rgba(9,11,18,.72);backdrop-filter:blur(14px)}
-[data-testid="stSidebar"]{background:linear-gradient(180deg,#121522,#0b0d14);border-right:1px solid rgba(255,255,255,.07)}
+[data-testid="stSidebar"]{display:none!important}[data-testid="stAppViewContainer"] .main .block-container{max-width:1440px;padding-top:2rem;padding-bottom:4rem}
 [data-testid="stMetric"]{background:linear-gradient(145deg,rgba(255,255,255,.075),rgba(255,255,255,.025));border:1px solid rgba(255,255,255,.10);border-radius:18px;padding:18px 20px;box-shadow:0 12px 34px rgba(0,0,0,.18);transition:transform .25s ease,border-color .25s ease,box-shadow .25s ease;animation:riseIn .7s both}
 [data-testid="stMetric"]:hover{transform:translateY(-5px);border-color:rgba(255,61,90,.55);box-shadow:0 14px 38px rgba(255,61,90,.24)}
 [data-testid="stMetricValue"]{font-family:'Outfit',sans-serif}
@@ -58,18 +58,10 @@ if not selected_id:
     </section>
     """, unsafe_allow_html=True)
 
-if not selected_id:
-    with st.sidebar:
-        st.header("Source data")
-        st.code("data/raw/\ntop_500.csv\ntop_250.csv\n2026_mov.csv")
-        st.caption("Required columns: Rank, Title, LetterboxdURI")
-        st.caption("SQLite database: database/cinescope.db")
-        st.divider()
-        st.header("TMDB enrichment")
-        st.caption("Posters and movie metadata are cached in SQLite.")
-        st.link_button("TMDB API documentation", "https://developer.themoviedb.org/docs")
+# Source/API configuration is kept out of the viewer-facing layout.
 
 source_movies, source_memberships, report = load_all_datasets()
+
 if not report["loaded"]:
     st.warning("No valid source CSVs found. Add the three files to data/raw/ to begin.")
     for item in DATASETS:
@@ -262,6 +254,63 @@ col4.metric("Lookups remaining", pending_count)
 st.caption("Only movies with an official TMDB poster are shown. Movies without poster artwork remain stored in SQLite and the original CSV files.")
 
 
+search = st.text_input("Search movie titles", key="catalogue_search")
+year_values = (
+    poster_catalogue["release_date"].fillna("").astype(str).str[:4]
+    .where(poster_catalogue["release_date"].notna(), "")
+)
+available_years = sorted(
+    {value for value in year_values if value.isdigit()}, reverse=True
+)
+year_options = ["All years"] + available_years + ["Unknown year"]
+selected_year = st.selectbox("Filter by release year", year_options)
+
+filtered = poster_catalogue.copy()
+if search.strip():
+    filtered = filtered[filtered["title"].str.contains(search.strip(), case=False, na=False)]
+if selected_year == "Unknown year":
+    filtered = filtered[year_values.loc[filtered.index] == ""]
+elif selected_year != "All years":
+    filtered = filtered[year_values.loc[filtered.index] == selected_year]
+
+st.caption(f"Showing {len(filtered)} of {len(poster_catalogue)} movies with official posters. Select a poster to view its details.")
+if filtered.empty:
+    st.info("No movies match the selected search and year.")
+else:
+    page_size = 40
+    page_count = max(1, (len(filtered) + page_size - 1) // page_size)
+    current_page = int(st.session_state.get("poster_page", 1))
+    st.session_state["poster_page"] = min(max(current_page, 1), page_count)
+    page = st.session_state["poster_page"]
+    visible = filtered.iloc[(page - 1) * page_size : page * page_size]
+    poster_cols = st.columns(5)
+    for idx, (_, movie) in enumerate(visible.iterrows()):
+        with poster_cols[idx % 5]:
+            image_url = poster_url(movie["poster_path"])
+            movie_id = int(movie["movie_id"])
+            title_text = html.escape(str(movie["title"]))
+            st.markdown(
+                f'<a class="poster-card" href="?movie_id={movie_id}" target="_self" title="View {title_text}">'
+                f'<img src="{image_url}" alt="{title_text}" '
+                'style="width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:8px;cursor:pointer;" />'
+                '</a>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(f"**{movie['title']}**")
+            release_year = str(movie["release_date"] or "")[:4]
+            if release_year and release_year != "nan":
+                st.caption(release_year)
+            if pd.notna(movie["vote_average"]):
+                st.caption(f"TMDB ★ {float(movie['vote_average']):.1f} · {int(movie['vote_count'] or 0):,} votes")
+
+    st.divider()
+    st.selectbox(
+        "Poster page",
+        options=list(range(1, page_count + 1)),
+        format_func=lambda value: f"Page {value} of {page_count}",
+        key="poster_page",
+    )
+
 # Interactive head-to-head comparison. Only poster-backed, TMDB-matched
 # catalogue entries are offered so both sides have reliable artwork.
 st.markdown('<div class="cine-section">⚔️ Movie Face-Off</div>', unsafe_allow_html=True)
@@ -281,26 +330,25 @@ if len(poster_catalogue) >= 2:
 
     pick_left, versus_col, pick_right = st.columns([5, 1, 5])
     with pick_left:
-        left_id = st.selectbox(
-            "First movie",
-            options=comparison_ids,
-            index=0,
-            format_func=comparison_label,
-            key="compare_movie_left",
-        )
+        left_query = st.text_input("Search first movie", placeholder="Type a title…", key="faceoff_search_left")
+        left_options = [mid for mid in comparison_ids if left_query.strip().casefold() in str(movie_lookup[mid]["title"]).casefold()]
+        if not left_options:
+            st.warning("No first-movie matches. Try another title.")
     with versus_col:
         st.markdown('<div class="compare-vs">VS</div>', unsafe_allow_html=True)
     with pick_right:
-        right_default = 1 if len(comparison_ids) > 1 else 0
-        right_id = st.selectbox(
-            "Second movie",
-            options=comparison_ids,
-            index=right_default,
-            format_func=comparison_label,
-            key="compare_movie_right",
-        )
+        right_query = st.text_input("Search second movie", placeholder="Type a title…", key="faceoff_search_right")
+        right_options = [mid for mid in comparison_ids if right_query.strip().casefold() in str(movie_lookup[mid]["title"]).casefold()]
+        if not right_options:
+            st.warning("No second-movie matches. Try another title.")
 
-    if left_id == right_id:
+    if left_options and right_options:
+        left_id = st.selectbox("Choose first film", options=left_options, format_func=comparison_label, key="compare_movie_left")
+        right_id = st.selectbox("Choose second film", options=right_options, format_func=comparison_label, key="compare_movie_right")
+
+    if not left_options or not right_options:
+        st.info("Search for two titles to begin the face-off.")
+    elif left_id == right_id:
         st.info("Choose two different movies to start the face-off.")
     else:
         left_movie = movie_lookup[int(left_id)]
@@ -386,67 +434,25 @@ if len(poster_catalogue) >= 2:
                 st.success(f"{right_movie['title']} currently has the higher TMDB user score ({right_rating:.1f} vs {left_rating:.1f}).")
             else:
                 st.info(f"Both movies currently have the same TMDB user score ({left_rating:.1f}/10).")
+        st.markdown("#### Story snapshot")
+        overview_left, overview_right = st.columns(2)
+        overview_left.markdown(f"**{left_movie['title']}**")
+        overview_left.write(safe_text(left_movie["overview"], "No synopsis available."))
+        overview_right.markdown(f"**{right_movie['title']}**")
+        overview_right.write(safe_text(right_movie["overview"], "No synopsis available."))
+        if left_rating is not None or right_rating is not None:
+            rating_plot = pd.DataFrame({
+                "Movie": [str(left_movie["title"]), str(right_movie["title"])],
+                "TMDB user score": [left_rating, right_rating],
+            }).dropna()
+            if not rating_plot.empty:
+                score_fig = px.bar(rating_plot, x="Movie", y="TMDB user score", range_y=[0, 10], text_auto=".1f")
+                score_fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_color="#e9e9f0", transition_duration=650)
+                st.plotly_chart(score_fig, use_container_width=True)
         st.caption("TMDB scores are user ratings, not critic scores. Vote counts and metadata can change as TMDB is updated.")
 else:
     st.info("At least two movies with TMDB posters are needed to use Movie Face-Off.")
 
-
-search = st.text_input("Search movie titles", key="catalogue_search")
-year_values = (
-    poster_catalogue["release_date"].fillna("").astype(str).str[:4]
-    .where(poster_catalogue["release_date"].notna(), "")
-)
-available_years = sorted(
-    {value for value in year_values if value.isdigit()}, reverse=True
-)
-year_options = ["All years"] + available_years + ["Unknown year"]
-selected_year = st.selectbox("Filter by release year", year_options)
-
-filtered = poster_catalogue.copy()
-if search.strip():
-    filtered = filtered[filtered["title"].str.contains(search.strip(), case=False, na=False)]
-if selected_year == "Unknown year":
-    filtered = filtered[year_values.loc[filtered.index] == ""]
-elif selected_year != "All years":
-    filtered = filtered[year_values.loc[filtered.index] == selected_year]
-
-st.caption(f"Showing {len(filtered)} of {len(poster_catalogue)} movies with official posters. Select a poster to view its details.")
-if filtered.empty:
-    st.info("No movies match the selected search and year.")
-else:
-    page_size = 40
-    page_count = max(1, (len(filtered) + page_size - 1) // page_size)
-    current_page = int(st.session_state.get("poster_page", 1))
-    st.session_state["poster_page"] = min(max(current_page, 1), page_count)
-    page = st.session_state["poster_page"]
-    visible = filtered.iloc[(page - 1) * page_size : page * page_size]
-    poster_cols = st.columns(5)
-    for idx, (_, movie) in enumerate(visible.iterrows()):
-        with poster_cols[idx % 5]:
-            image_url = poster_url(movie["poster_path"])
-            movie_id = int(movie["movie_id"])
-            title_text = html.escape(str(movie["title"]))
-            st.markdown(
-                f'<a class="poster-card" href="?movie_id={movie_id}" target="_self" title="View {title_text}">'
-                f'<img src="{image_url}" alt="{title_text}" '
-                'style="width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:8px;cursor:pointer;" />'
-                '</a>',
-                unsafe_allow_html=True,
-            )
-            st.markdown(f"**{movie['title']}**")
-            release_year = str(movie["release_date"] or "")[:4]
-            if release_year and release_year != "nan":
-                st.caption(release_year)
-            if pd.notna(movie["vote_average"]):
-                st.caption(f"TMDB ★ {float(movie['vote_average']):.1f} · {int(movie['vote_count'] or 0):,} votes")
-
-    st.divider()
-    st.selectbox(
-        "Poster page",
-        options=list(range(1, page_count + 1)),
-        format_func=lambda value: f"Page {value} of {page_count}",
-        key="poster_page",
-    )
 
 st.info(
     "List rank is not a movie rating. TMDB ratings are separate from Letterboxd list ranks. "
