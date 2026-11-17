@@ -14,20 +14,23 @@ from ingestion.csv_loader import DATASETS, load_all_datasets
 from ingestion.tmdb_client import TMDBClient, poster_url
 
 st.set_page_config(page_title="CineScope", page_icon="🎬", layout="wide")
-st.title("🎬 CineScope")
-st.subheader("Movies & Entertainment Intelligence Platform")
-st.caption("PYTHON Programming (MCA411-2) | Component 3 | CHRIST University")
-st.write("Explore curated movie lists through a data-driven Python and Streamlit dashboard.")
+selected_id = st.query_params.get("movie_id")
+if not selected_id:
+    st.title("🎬 CineScope")
+    st.subheader("Movies & Entertainment Intelligence Platform")
+    st.caption("PYTHON Programming (MCA411-2) | Component 3 | CHRIST University")
+    st.write("Explore curated movie lists through a data-driven Python and Streamlit dashboard.")
 
-with st.sidebar:
+if not selected_id:
+    with st.sidebar:
     st.header("Source data")
-    st.code("data/raw/\ntop_500.csv\ntop_250.csv\n2026_mov.csv")
-    st.caption("Required columns: Rank, Title, LetterboxdURI")
-    st.caption("SQLite database: database/cinescope.db")
-    st.divider()
-    st.header("TMDB enrichment")
-    st.caption("Posters and movie metadata are cached in SQLite.")
-    st.link_button("TMDB API documentation", "https://developer.themoviedb.org/docs")
+        st.code("data/raw/\ntop_500.csv\ntop_250.csv\n2026_mov.csv")
+        st.caption("Required columns: Rank, Title, LetterboxdURI")
+        st.caption("SQLite database: database/cinescope.db")
+        st.divider()
+        st.header("TMDB enrichment")
+        st.caption("Posters and movie metadata are cached in SQLite.")
+        st.link_button("TMDB API documentation", "https://developer.themoviedb.org/docs")
 
 source_movies, source_memberships, report = load_all_datasets()
 if not report["loaded"]:
@@ -48,45 +51,7 @@ if movies.empty or memberships.empty:
     st.warning("The source files loaded, but no valid movie-list memberships were imported.")
     st.stop()
 
-membership_counts = memberships.groupby("letterboxd_uri")["list_name"].nunique()
-shared_count = int((membership_counts > 1).sum())
-a, b, c, d = st.columns(4)
-a.metric("Lists loaded", len(report["loaded"]))
-b.metric("List entries", len(memberships))
-c.metric("Unique movies", len(movies))
-d.metric("Movies in multiple lists", shared_count)
-st.caption("Dashboard data is read from SQLite and refreshed from the validated CSV sources on each app run.")
 
-st.subheader("Data quality")
-rows = [
-    {"List": item["name"], "File": item["filename"], "Rows read": item["rows_read"],
-     "Valid": item["valid_rows"], "Rejected": item["rejected_rows"]}
-    for item in report["reports"]
-]
-st.dataframe(rows, use_container_width=True, hide_index=True)
-for message in report["errors"]:
-    st.warning(message)
-
-left, right = st.columns(2)
-with left:
-    st.subheader("Movies by list")
-    counts = memberships.groupby("list_name", as_index=False).size()
-    fig = px.bar(counts, x="list_name", y="size", color="list_name",
-                 labels={"list_name": "Curated list", "size": "Movie entries"})
-    fig.update_layout(showlegend=False, xaxis_title=None)
-    st.plotly_chart(fig, use_container_width=True)
-with right:
-    st.subheader("Overlap across lists")
-    overlap = memberships.groupby("list_name")["letterboxd_uri"].nunique().rename(
-        "Unique movies").reset_index()
-    overlap_fig = px.pie(overlap, names="list_name", values="Unique movies")
-    st.plotly_chart(overlap_fig, use_container_width=True)
-
-tmdb_token = (
-    st.secrets.get("TMDB_READ_ACCESS_TOKEN")
-    or st.secrets.get("tmdb", {}).get("read_access_token")
-    or os.getenv("TMDB_READ_ACCESS_TOKEN")
-)
 
 st.divider()
 st.header("🎞️ Movie catalogue")
@@ -120,21 +85,13 @@ if tmdb_token and not pending.empty:
     if failed_title is None and completed:
         st.success(f"Finished checking {completed} movie record(s).")
 
-catalogue = get_movie_catalogue()
-matched_count = int(catalogue["tmdb_id"].notna().sum())
-checked_count = int(catalogue["match_status"].notna().sum())
-pending_count = max(0, len(catalogue) - checked_count)
-has_poster = catalogue["poster_path"].fillna("").astype(str).str.strip().ne("")
-poster_catalogue = catalogue.loc[has_poster].copy()
-poster_count = len(poster_catalogue)
-hidden_count = len(catalogue) - poster_count
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Source movies", len(catalogue))
-col2.metric("Movies with posters", poster_count)
-col3.metric("Hidden (no poster)", hidden_count)
-col4.metric("Lookups remaining", pending_count)
-st.caption("Only movies with an official TMDB poster are shown. Movies without poster artwork remain stored in SQLite and the original CSV files.")
+tmdb_token = (
+    st.secrets.get("TMDB_READ_ACCESS_TOKEN")
+    or st.secrets.get("tmdb", {}).get("read_access_token")
+    or os.getenv("TMDB_READ_ACCESS_TOKEN")
+)
 
+catalogue = get_movie_catalogue()
 # A query-string route gives each poster a shareable, dedicated detail view.
 selected_id = st.query_params.get("movie_id")
 if selected_id:
@@ -211,6 +168,56 @@ if selected_id:
                 hide_index=True,
             )
     st.stop()
+
+
+membership_counts = memberships.groupby("letterboxd_uri")["list_name"].nunique()
+shared_count = int((membership_counts > 1).sum())
+a, b, c, d = st.columns(4)
+a.metric("Lists loaded", len(report["loaded"]))
+b.metric("List entries", len(memberships))
+c.metric("Unique movies", len(movies))
+d.metric("Movies in multiple lists", shared_count)
+st.caption("Dashboard data is read from SQLite and refreshed from the validated CSV sources on each app run.")
+
+st.subheader("Data quality")
+rows = [
+    {"List": item["name"], "File": item["filename"], "Rows read": item["rows_read"],
+     "Valid": item["valid_rows"], "Rejected": item["rejected_rows"]}
+    for item in report["reports"]
+]
+st.dataframe(rows, use_container_width=True, hide_index=True)
+for message in report["errors"]:
+    st.warning(message)
+
+left, right = st.columns(2)
+with left:
+    st.subheader("Movies by list")
+    counts = memberships.groupby("list_name", as_index=False).size()
+    fig = px.bar(counts, x="list_name", y="size", color="list_name",
+                 labels={"list_name": "Curated list", "size": "Movie entries"})
+    fig.update_layout(showlegend=False, xaxis_title=None)
+    st.plotly_chart(fig, use_container_width=True)
+with right:
+    st.subheader("Overlap across lists")
+    overlap = memberships.groupby("list_name")["letterboxd_uri"].nunique().rename(
+        "Unique movies").reset_index()
+    overlap_fig = px.pie(overlap, names="list_name", values="Unique movies")
+    st.plotly_chart(overlap_fig, use_container_width=True)
+
+matched_count = int(catalogue["tmdb_id"].notna().sum())
+checked_count = int(catalogue["match_status"].notna().sum())
+pending_count = max(0, len(catalogue) - checked_count)
+has_poster = catalogue["poster_path"].fillna("").astype(str).str.strip().ne("")
+poster_catalogue = catalogue.loc[has_poster].copy()
+poster_count = len(poster_catalogue)
+hidden_count = len(catalogue) - poster_count
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Source movies", len(catalogue))
+col2.metric("Movies with posters", poster_count)
+col3.metric("Hidden (no poster)", hidden_count)
+col4.metric("Lookups remaining", pending_count)
+st.caption("Only movies with an official TMDB poster are shown. Movies without poster artwork remain stored in SQLite and the original CSV files.")
+
 
 search = st.text_input("Search movie titles", key="catalogue_search")
 year_values = (
