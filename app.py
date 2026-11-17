@@ -37,6 +37,7 @@ h1,h2,h3{font-family:'Outfit',sans-serif!important;letter-spacing:-.035em}
 .cine-pulse{display:inline-block;width:8px;height:8px;border-radius:50%;background:#65e6b2;box-shadow:0 0 14px #65e6b2;margin-right:9px;animation:livePulse 1.8s infinite}
 .cine-section{display:flex;align-items:center;gap:10px;margin:24px 0 12px;color:#f4f4f7;font-family:'Outfit',sans-serif;font-size:1.35rem;font-weight:700}
 .cine-section:before{content:'';width:4px;height:24px;border-radius:8px;background:linear-gradient(#ff3d5a,#ff9c72);box-shadow:0 0 14px rgba(255,61,90,.24)}
+.compare-panel{background:linear-gradient(145deg,rgba(255,255,255,.07),rgba(255,255,255,.025));border:1px solid rgba(255,255,255,.11);border-radius:20px;padding:18px;box-shadow:0 18px 45px rgba(0,0,0,.18);animation:riseIn .65s both}.compare-vs{font-family:'Outfit',sans-serif;font-weight:800;font-size:1.35rem;letter-spacing:.08em;color:#ff8293;text-align:center;padding-top:18px}.compare-label{color:#ff9aa8;text-transform:uppercase;letter-spacing:.14em;font-size:.68rem;font-weight:700}
 .poster-card img{transition:transform .35s ease,filter .35s ease,box-shadow .35s ease}
 .poster-card:hover img{transform:translateY(-7px) scale(1.025);filter:saturate(1.12) brightness(1.08);box-shadow:0 18px 38px rgba(255,61,90,.22)}
 [data-testid="stImage"] img{border-radius:14px}
@@ -259,6 +260,135 @@ col2.metric("Movies with posters", poster_count)
 col3.metric("Hidden (no poster)", hidden_count)
 col4.metric("Lookups remaining", pending_count)
 st.caption("Only movies with an official TMDB poster are shown. Movies without poster artwork remain stored in SQLite and the original CSV files.")
+
+
+# Interactive head-to-head comparison. Only poster-backed, TMDB-matched
+# catalogue entries are offered so both sides have reliable artwork.
+st.markdown('<div class="cine-section">⚔️ Movie Face-Off</div>', unsafe_allow_html=True)
+st.caption("Pick two films and compare their available TMDB facts and curated-list footprints.")
+if len(poster_catalogue) >= 2:
+    comparison_ids = [int(value) for value in poster_catalogue["movie_id"].tolist()]
+    movie_lookup = {
+        int(row["movie_id"]): row
+        for _, row in poster_catalogue.iterrows()
+    }
+
+    def comparison_label(movie_id):
+        row = movie_lookup[int(movie_id)]
+        release = row["release_date"]
+        year = str(release)[:4] if pd.notna(release) and str(release) else "Year unknown"
+        return f'{row["title"]} ({year})'
+
+    pick_left, versus_col, pick_right = st.columns([5, 1, 5])
+    with pick_left:
+        left_id = st.selectbox(
+            "First movie",
+            options=comparison_ids,
+            index=0,
+            format_func=comparison_label,
+            key="compare_movie_left",
+        )
+    with versus_col:
+        st.markdown('<div class="compare-vs">VS</div>', unsafe_allow_html=True)
+    with pick_right:
+        right_default = 1 if len(comparison_ids) > 1 else 0
+        right_id = st.selectbox(
+            "Second movie",
+            options=comparison_ids,
+            index=right_default,
+            format_func=comparison_label,
+            key="compare_movie_right",
+        )
+
+    if left_id == right_id:
+        st.info("Choose two different movies to start the face-off.")
+    else:
+        left_movie = movie_lookup[int(left_id)]
+        right_movie = movie_lookup[int(right_id)]
+
+        def safe_text(value, fallback="Not available"):
+            return fallback if pd.isna(value) or str(value).strip() == "" else str(value)
+
+        def movie_year(row):
+            value = safe_text(row["release_date"], "")
+            return value[:4] if value else "Unknown"
+
+        def movie_genres(row):
+            try:
+                values = json.loads(row["genres_json"] or "[]")
+                return set(values) if isinstance(values, list) else set()
+            except (TypeError, ValueError):
+                return set()
+
+        left_genres = movie_genres(left_movie)
+        right_genres = movie_genres(right_movie)
+        common_genres = sorted(left_genres & right_genres)
+        left_members = set(memberships.loc[
+            memberships["letterboxd_uri"] == left_movie["letterboxd_uri"], "list_name"
+        ].dropna().astype(str))
+        right_members = set(memberships.loc[
+            memberships["letterboxd_uri"] == right_movie["letterboxd_uri"], "list_name"
+        ].dropna().astype(str))
+        common_lists = sorted(left_members & right_members)
+
+        card_left, card_right = st.columns(2, gap="large")
+        for card_col, row in ((card_left, left_movie), (card_right, right_movie)):
+            with card_col:
+                st.markdown('<div class="compare-panel">', unsafe_allow_html=True)
+                st.image(poster_url(row["poster_path"]), use_container_width=True)
+                st.markdown(f"### {row['title']}")
+                st.markdown(
+                    f'<div class="compare-label">{movie_year(row)} · {safe_text(row["original_language"], "Language unknown").upper()}</div>',
+                    unsafe_allow_html=True,
+                )
+                st.markdown("</div>", unsafe_allow_html=True)
+
+        def compare_row(label, left_value, right_value):
+            st.markdown(f"**{label}**")
+            c1, c2 = st.columns(2)
+            c1.write(left_value)
+            c2.write(right_value)
+
+        st.markdown("#### Head-to-head stats")
+        left_rating = float(left_movie["vote_average"]) if pd.notna(left_movie["vote_average"]) else None
+        right_rating = float(right_movie["vote_average"]) if pd.notna(right_movie["vote_average"]) else None
+        left_votes = int(left_movie["vote_count"]) if pd.notna(left_movie["vote_count"]) else None
+        right_votes = int(right_movie["vote_count"]) if pd.notna(right_movie["vote_count"]) else None
+        left_runtime = int(left_movie["runtime"]) if pd.notna(left_movie["runtime"]) else None
+        right_runtime = int(right_movie["runtime"]) if pd.notna(right_movie["runtime"]) else None
+        compare_row("TMDB user score", f"{left_rating:.1f}/10" if left_rating is not None else "Not available",
+                    f"{right_rating:.1f}/10" if right_rating is not None else "Not available")
+        compare_row("TMDB vote count", f"{left_votes:,}" if left_votes is not None else "Not available",
+                    f"{right_votes:,}" if right_votes is not None else "Not available")
+        compare_row("Runtime", f"{left_runtime} min" if left_runtime is not None else "Not available",
+                    f"{right_runtime} min" if right_runtime is not None else "Not available")
+        compare_row("Genres", ", ".join(sorted(left_genres)) or "Not available",
+                    ", ".join(sorted(right_genres)) or "Not available")
+        compare_row("Curated lists", ", ".join(sorted(left_members)) or "None found",
+                    ", ".join(sorted(right_members)) or "None found")
+
+        st.markdown("#### What do they have in common?")
+        common_col, list_col = st.columns(2)
+        common_col.metric("Shared genres", len(common_genres))
+        list_col.metric("Shared curated lists", len(common_lists))
+        if common_genres:
+            st.write("**Genres in common:** " + ", ".join(common_genres))
+        else:
+            st.caption("No shared genre metadata is available for this pair.")
+        if common_lists:
+            st.write("**Both appear in:** " + ", ".join(common_lists))
+        else:
+            st.caption("These movies do not share a curated source list.")
+        if left_rating is not None and right_rating is not None:
+            if left_rating > right_rating:
+                st.success(f"{left_movie['title']} currently has the higher TMDB user score ({left_rating:.1f} vs {right_rating:.1f}).")
+            elif right_rating > left_rating:
+                st.success(f"{right_movie['title']} currently has the higher TMDB user score ({right_rating:.1f} vs {left_rating:.1f}).")
+            else:
+                st.info(f"Both movies currently have the same TMDB user score ({left_rating:.1f}/10).")
+        st.caption("TMDB scores are user ratings, not critic scores. Vote counts and metadata can change as TMDB is updated.")
+else:
+    st.info("At least two movies with TMDB posters are needed to use Movie Face-Off.")
 
 
 search = st.text_input("Search movie titles", key="catalogue_search")
