@@ -41,7 +41,7 @@ def load_dataset(path, list_name):
     valid = (
         work["Title"].notna() & work["Title"].ne("")
         & work["LetterboxdURI"].str.match(
-            r"^https?://(?:www\\.)?letterboxd\\.com/film/[^\\s]+/?$",
+            r"^https?://(?:www\.)?letterboxd\.com/film/[^\s]+/?$",
             case=False, na=False
         )
         & work["Rank"].notna() & work["Rank"].gt(0)
