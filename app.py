@@ -23,7 +23,7 @@ if not selected_id:
 
 if not selected_id:
     with st.sidebar:
-    st.header("Source data")
+        st.header("Source data")
         st.code("data/raw/\ntop_500.csv\ntop_250.csv\n2026_mov.csv")
         st.caption("Required columns: Rank, Title, LetterboxdURI")
         st.caption("SQLite database: database/cinescope.db")
@@ -52,14 +52,22 @@ if movies.empty or memberships.empty:
     st.stop()
 
 
+tmdb_token = (
+    st.secrets.get("TMDB_READ_ACCESS_TOKEN")
+    or st.secrets.get("tmdb", {}).get("read_access_token")
+    or os.getenv("TMDB_READ_ACCESS_TOKEN")
+)
 
-st.divider()
-st.header("🎞️ Movie catalogue")
+
+
+if not selected_id:
+    st.divider()
+    st.header("🎞️ Movie catalogue")
 
 # Process every unchecked source record automatically. Each title uses one
 # TMDB search request; successful, ambiguous and unmatched results are cached.
-pending = get_pending_tmdb_movies(limit=max(len(movies), 1))
-if tmdb_token and not pending.empty:
+pending = get_pending_tmdb_movies(limit=max(len(movies), 1)) if not selected_id else pd.DataFrame()
+if not selected_id and tmdb_token and not pending.empty:
     client = TMDBClient(tmdb_token)
     progress = st.progress(0, text=f"Checking all {len(pending)} remaining movie records…")
     completed = 0
@@ -85,13 +93,11 @@ if tmdb_token and not pending.empty:
     if failed_title is None and completed:
         st.success(f"Finished checking {completed} movie record(s).")
 
-tmdb_token = (
-    st.secrets.get("TMDB_READ_ACCESS_TOKEN")
-    or st.secrets.get("tmdb", {}).get("read_access_token")
-    or os.getenv("TMDB_READ_ACCESS_TOKEN")
-)
+
 
 catalogue = get_movie_catalogue()
+has_poster = catalogue["poster_path"].fillna("").astype(str).str.strip().ne("")
+poster_catalogue = catalogue.loc[has_poster].copy()
 # A query-string route gives each poster a shareable, dedicated detail view.
 selected_id = st.query_params.get("movie_id")
 if selected_id:
@@ -207,8 +213,6 @@ with right:
 matched_count = int(catalogue["tmdb_id"].notna().sum())
 checked_count = int(catalogue["match_status"].notna().sum())
 pending_count = max(0, len(catalogue) - checked_count)
-has_poster = catalogue["poster_path"].fillna("").astype(str).str.strip().ne("")
-poster_catalogue = catalogue.loc[has_poster].copy()
 poster_count = len(poster_catalogue)
 hidden_count = len(catalogue) - poster_count
 col1, col2, col3, col4 = st.columns(4)
