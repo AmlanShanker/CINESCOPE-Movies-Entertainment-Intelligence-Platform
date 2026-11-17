@@ -15,11 +15,47 @@ from ingestion.tmdb_client import TMDBClient, poster_url
 
 st.set_page_config(page_title="CineScope", page_icon="🎬", layout="wide")
 selected_id = st.query_params.get("movie_id")
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap');
+.stApp{background:radial-gradient(ellipse at 12% 0%,rgba(111,35,70,.22),transparent 38%),radial-gradient(ellipse at 90% 8%,rgba(42,69,112,.20),transparent 34%),linear-gradient(160deg,#090b12,#10131d 48%,#090b12);color:#f4f4f7;font-family:'DM Sans',sans-serif}
+h1,h2,h3{font-family:'Outfit',sans-serif!important;letter-spacing:-.035em}
+[data-testid="stHeader"]{background:rgba(9,11,18,.72);backdrop-filter:blur(14px)}
+[data-testid="stSidebar"]{background:linear-gradient(180deg,#121522,#0b0d14);border-right:1px solid rgba(255,255,255,.07)}
+[data-testid="stMetric"]{background:linear-gradient(145deg,rgba(255,255,255,.075),rgba(255,255,255,.025));border:1px solid rgba(255,255,255,.10);border-radius:18px;padding:18px 20px;box-shadow:0 12px 34px rgba(0,0,0,.18);transition:transform .25s ease,border-color .25s ease,box-shadow .25s ease;animation:riseIn .7s both}
+[data-testid="stMetric"]:hover{transform:translateY(-5px);border-color:rgba(255,61,90,.55);box-shadow:0 14px 38px rgba(255,61,90,.24)}
+[data-testid="stMetricValue"]{font-family:'Outfit',sans-serif}
+.stButton>button,.stLinkButton>a{border-radius:999px;border:1px solid rgba(255,255,255,.18);transition:all .22s ease;font-weight:600}
+.stButton>button:hover,.stLinkButton>a:hover{border-color:#ff3d5a;color:#fff;box-shadow:0 0 22px rgba(255,61,90,.24);transform:translateY(-2px)}
+[data-testid="stPlotlyChart"]{animation:fadeIn .9s ease both}
+.cine-hero{position:relative;overflow:hidden;padding:clamp(28px,5vw,58px);border-radius:28px;margin:12px 0 28px;background:linear-gradient(115deg,rgba(31,20,34,.96),rgba(17,24,42,.94) 58%,rgba(42,19,34,.92));border:1px solid rgba(255,255,255,.13);box-shadow:0 24px 70px rgba(0,0,0,.35)}
+.cine-hero:before{content:'';position:absolute;width:420px;height:420px;right:-100px;top:-240px;background:radial-gradient(circle,rgba(255,61,90,.34),transparent 68%);animation:ambientPulse 5s ease-in-out infinite alternate}
+.cine-kicker{color:#ff8394;text-transform:uppercase;letter-spacing:.24em;font-size:.72rem;font-weight:700}
+.cine-title{font-family:'Outfit',sans-serif;font-size:clamp(2.7rem,6vw,5.2rem);line-height:.98;font-weight:800;letter-spacing:-.055em;margin:12px 0}
+.cine-title span{background:linear-gradient(90deg,#fff 5%,#ff8293 48%,#d9c5ff 95%);-webkit-background-clip:text;color:transparent}
+.cine-subtitle{color:#c2c3d0;max-width:650px;font-size:1.04rem;line-height:1.7}
+.cine-pulse{display:inline-block;width:8px;height:8px;border-radius:50%;background:#65e6b2;box-shadow:0 0 14px #65e6b2;margin-right:9px;animation:livePulse 1.8s infinite}
+.cine-section{display:flex;align-items:center;gap:10px;margin:24px 0 12px;color:#f4f4f7;font-family:'Outfit',sans-serif;font-size:1.35rem;font-weight:700}
+.cine-section:before{content:'';width:4px;height:24px;border-radius:8px;background:linear-gradient(#ff3d5a,#ff9c72);box-shadow:0 0 14px rgba(255,61,90,.24)}
+.poster-card img{transition:transform .35s ease,filter .35s ease,box-shadow .35s ease}
+.poster-card:hover img{transform:translateY(-7px) scale(1.025);filter:saturate(1.12) brightness(1.08);box-shadow:0 18px 38px rgba(255,61,90,.22)}
+[data-testid="stImage"] img{border-radius:14px}
+hr{border-color:rgba(255,255,255,.10)!important}
+@keyframes riseIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes ambientPulse{from{transform:scale(.85);opacity:.65}to{transform:scale(1.18);opacity:1}}
+@keyframes livePulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.78)}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+</style>
+""", unsafe_allow_html=True)
 if not selected_id:
-    st.title("🎬 CineScope")
-    st.subheader("Movies & Entertainment Intelligence Platform")
-    st.caption("PYTHON Programming (MCA411-2) | Component 3 | CHRIST University")
-    st.write("Explore curated movie lists through a data-driven Python and Streamlit dashboard.")
+    st.markdown("""
+    <section class="cine-hero">
+      <div class="cine-kicker"><span class="cine-pulse"></span> YOUR PERSONAL CINEMA INTELLIGENCE HUB</div>
+      <div class="cine-title"><span>CineScope</span></div>
+      <div class="cine-subtitle">Discover the stories behind the screen. Explore curated movie collections, uncover connections across lists, and dive into film details through an immersive, data-powered experience.</div>
+    </section>
+    """, unsafe_allow_html=True)
 
 if not selected_id:
     with st.sidebar:
@@ -62,7 +98,7 @@ tmdb_token = (
 
 if not selected_id:
     st.divider()
-    st.header("🎞️ Movie catalogue")
+    st.markdown('<div class="cine-section">🎞️ Explore the collection</div>', unsafe_allow_html=True)
 
 # Process every unchecked source record automatically. Each title uses one
 # TMDB search request; successful, ambiguous and unmatched results are cached.
@@ -185,7 +221,7 @@ c.metric("Unique movies", len(movies))
 d.metric("Movies in multiple lists", shared_count)
 st.caption("Dashboard data is read from SQLite and refreshed from the validated CSV sources on each app run.")
 
-st.subheader("Data quality")
+st.markdown('<div class="cine-section">✦ Data quality</div>', unsafe_allow_html=True)
 rows = [
     {"List": item["name"], "File": item["filename"], "Rows read": item["rows_read"],
      "Valid": item["valid_rows"], "Rejected": item["rejected_rows"]}
@@ -197,17 +233,19 @@ for message in report["errors"]:
 
 left, right = st.columns(2)
 with left:
-    st.subheader("Movies by list")
+    st.markdown('<div class="cine-section">▥ Movies by list</div>', unsafe_allow_html=True)
     counts = memberships.groupby("list_name", as_index=False).size()
     fig = px.bar(counts, x="list_name", y="size", color="list_name",
                  labels={"list_name": "Curated list", "size": "Movie entries"})
     fig.update_layout(showlegend=False, xaxis_title=None)
+    fig.update_layout(transition_duration=700, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_color="#e9e9f0")
     st.plotly_chart(fig, use_container_width=True)
 with right:
-    st.subheader("Overlap across lists")
+    st.markdown('<div class="cine-section">◉ Collection overlap</div>', unsafe_allow_html=True)
     overlap = memberships.groupby("list_name")["letterboxd_uri"].nunique().rename(
         "Unique movies").reset_index()
     overlap_fig = px.pie(overlap, names="list_name", values="Unique movies")
+    overlap_fig.update_layout(transition_duration=700, paper_bgcolor="rgba(0,0,0,0)", font_color="#e9e9f0")
     st.plotly_chart(overlap_fig, use_container_width=True)
 
 matched_count = int(catalogue["tmdb_id"].notna().sum())
@@ -259,7 +297,7 @@ else:
             movie_id = int(movie["movie_id"])
             title_text = html.escape(str(movie["title"]))
             st.markdown(
-                f'<a href="?movie_id={movie_id}" target="_self" title="View {title_text}">'
+                f'<a class="poster-card" href="?movie_id={movie_id}" target="_self" title="View {title_text}">'
                 f'<img src="{image_url}" alt="{title_text}" '
                 'style="width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:8px;cursor:pointer;" />'
                 '</a>',
