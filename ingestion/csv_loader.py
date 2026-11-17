@@ -22,7 +22,7 @@ def load_dataset(path, list_name):
         report["errors"].append(f"{path.name}: file not found")
         return empty_movies, empty_members, report
     try:
-        frame = pd.read_csv(path)
+        frame = pd.read_csv(path, encoding="utf-8-sig")
     except Exception as exc:
         report["errors"].append(f"{path.name}: could not read CSV: {exc}")
         return empty_movies, empty_members, report
