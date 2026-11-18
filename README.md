@@ -18,7 +18,7 @@
 
 Explore collection-level insights, find films by title or release year, open detailed movie pages, and compare two movies side by side with **Movie Face-Off**.
 
-> CineScope is an exploration and collection-intelligence project. It distinguishes curated-list rankings from TMDB user ratings and does not present unsupported box-office, streaming or sentiment data as fact.
+> CineScope is an exploration and collection-intelligence project. It distinguishes curated-list rankings from TMDB user ratings.
 
 ## ✨ Features
 
@@ -90,7 +90,7 @@ Each CSV must contain these columns:
 - `Title` — movie title
 - `LetterboxdURI` — Letterboxd movie URL used to identify the movie
 
-**Important:** A source-list rank is not a movie rating. The three CSVs do not, by themselves, provide verified genres, revenue, OTT availability, sentiment, critic scores or release status. TMDB ratings and metadata are separate data sourced from TMDB.
+**Important:** A source-list rank is not a movie rating. TMDB ratings and metadata are separate data sourced from TMDB.
 
 ## 🚀 Getting started
 
@@ -219,12 +219,11 @@ The database and secrets files are generated or configured locally and should re
 - Letterboxd list positions represent **curated-list ranks**, not ratings.
 - TMDB scores represent TMDB user ratings and may change as votes are updated.
 - Metadata availability depends on TMDB matching and the fields returned by the API.
-- Box-office revenue, OTT availability, sentiment analysis, movie-success prediction and awards intelligence are not currently implemented features.
 - Review [TMDB's terms, attribution and branding requirements](https://www.themoviedb.org/documentation/api/terms-of-use) before deploying or redistributing TMDB-powered content.
 
 ## 🛣️ Project scope
 
-The current application focuses on curated-list ingestion, collection analytics, TMDB-enriched movie discovery, movie details and side-by-side comparison. Additional intelligence modules—such as box-office analysis, OTT tracking, Indian cinema insights, recommendations, sentiment analysis, success prediction and celebrity/awards analytics—would require additional datasets, APIs and validation before being presented as live features.
+The current application focuses on curated-list ingestion, collection analytics, TMDB-enriched movie discovery, movie details and side-by-side comparison.
 
 ## 🤝 Contributing
 
