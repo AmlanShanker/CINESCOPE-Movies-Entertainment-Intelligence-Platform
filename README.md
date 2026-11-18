@@ -1,6 +1,6 @@
 # CineScope — Movies & Entertainment Intelligence Platform
 
-CineScope is a Python + Streamlit Smart Dashboard Application for PYTHON Programming (MCA411-2), Component 3, at CHRIST University.
+CineScope is a Python + Streamlit Smart Dashboard Application.
 
 ## Implemented
 
